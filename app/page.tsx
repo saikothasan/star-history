@@ -17,6 +17,7 @@ import {
   Menu,
   Download,
   GitBranch,
+  BarChart3,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -25,13 +26,15 @@ import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 import Link from "next/link"
-import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart } from "recharts"
 import { GitHubAPI, type GitHubRepo, type StarHistoryData } from "@/lib/github-api"
 import { GitHubTokenDialog } from "@/components/github-token-dialog"
 import { RepositorySearch } from "@/components/repository-search"
 import { RateLimitIndicator } from "@/components/rate-limit-indicator"
 import { ExportDialog } from "@/components/export-dialog"
 import { RepositoryComparison } from "@/components/repository-comparison"
+import { RepositoryInsights } from "@/components/repository-insights"
+import { EmbedDialog } from "@/components/embed-dialog"
+import { AdvancedChart } from "@/components/advanced-chart"
 
 interface SelectedRepo extends GitHubRepo {
   color: string
@@ -48,6 +51,11 @@ export default function StarHistoryClone() {
   const [error, setError] = useState<string>()
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const chartRef = useRef<HTMLDivElement>(null)
+
+  const [selectedTimeRange, setSelectedTimeRange] = useState<"all" | "1y" | "6m" | "3m" | "1m">("all")
+  const [hoveredDataPoint, setHoveredDataPoint] = useState<any>(null)
+  const [showInsights, setShowInsights] = useState(false)
+  const [zoomDomain, setZoomDomain] = useState<{ start?: number; end?: number }>({})
 
   const repoColors = ["#3b82f6", "#ef4444", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899"]
 
@@ -483,6 +491,16 @@ export default function StarHistoryClone() {
                     <GitBranch className="w-4 h-4 mr-2" />
                     Compare
                   </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={selectedRepos.length === 0}
+                    className="flex-1"
+                    onClick={() => setShowInsights(!showInsights)}
+                  >
+                    <BarChart3 className="w-4 h-4 mr-2" />
+                    Insights
+                  </Button>
                 </div>
               </div>
 
@@ -605,97 +623,43 @@ export default function StarHistoryClone() {
               <CardTitle className="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-2 sm:space-y-0">
                 <span className="text-lg sm:text-xl font-bold text-slate-800">Star History</span>
                 {selectedRepos.length > 0 && (
-                  <div className="flex items-center space-x-4 text-sm text-slate-600">
-                    <span>Last updated: {new Date().toLocaleDateString()}</span>
+                  <div className="flex items-center space-x-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowInsights(!showInsights)}
+                      className="hidden sm:flex"
+                    >
+                      <BarChart3 className="w-4 h-4 mr-2" />
+                      {showInsights ? "Hide Insights" : "Show Insights"}
+                    </Button>
+                    <EmbedDialog repositories={selectedRepos} starHistoryData={starHistoryData} chartData={chartData} />
                   </div>
                 )}
               </CardTitle>
             </CardHeader>
             <CardContent className="p-4 sm:p-6">
-              <div ref={chartRef} className="h-64 sm:h-96">
-                {isAnyLoading ? (
-                  <div className="flex flex-col items-center justify-center h-full space-y-4">
-                    <div className="w-12 h-12 border-4 border-emerald-200 border-t-emerald-600 rounded-full animate-spin"></div>
-                    <p className="text-slate-600 font-medium">Loading star history...</p>
-                    <p className="text-sm text-slate-400">Fetching data from GitHub API</p>
-                  </div>
-                ) : selectedRepos.length > 0 && chartData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={chartData}>
-                      <defs>
-                        {selectedRepos.map((repo, index) => (
-                          <linearGradient key={index} id={`color${index}`} x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor={repo.color} stopOpacity={0.3} />
-                            <stop offset="95%" stopColor={repo.color} stopOpacity={0.05} />
-                          </linearGradient>
-                        ))}
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                      <XAxis
-                        dataKey="displayDate"
-                        stroke="#64748b"
-                        fontSize={12}
-                        tickLine={false}
-                        interval="preserveStartEnd"
-                      />
-                      <YAxis
-                        stroke="#64748b"
-                        fontSize={12}
-                        tickLine={false}
-                        tickFormatter={(value) => value.toLocaleString()}
-                        width={60}
-                      />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: "white",
-                          border: "1px solid #e2e8f0",
-                          borderRadius: "8px",
-                          boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.1)",
-                        }}
-                        formatter={(value: any, name: string) => {
-                          const repoIndex = Number.parseInt(name.replace("repo", ""))
-                          const repo = selectedRepos[repoIndex]
-                          return [value?.toLocaleString(), repo?.full_name || "Repository"]
-                        }}
-                        labelFormatter={(label) => `Date: ${label}`}
-                      />
-                      {selectedRepos.map(
-                        (repo, index) =>
-                          repo.starHistory && (
-                            <Area
-                              key={index}
-                              type="monotone"
-                              dataKey={`repo${index}`}
-                              stroke={repo.color}
-                              strokeWidth={2}
-                              fill={`url(#color${index})`}
-                              dot={false}
-                              activeDot={{ r: 4, stroke: repo.color, strokeWidth: 2, fill: "white" }}
-                            />
-                          ),
-                      )}
-                    </AreaChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="flex flex-col items-center justify-center h-full space-y-6">
-                    <div className="w-16 h-16 sm:w-24 sm:h-24 bg-gradient-to-br from-slate-100 to-slate-200 rounded-2xl flex items-center justify-center shadow-lg">
-                      <TrendingUp className="w-8 h-8 sm:w-12 sm:h-12 text-slate-400" />
-                    </div>
-                    <div className="text-center px-4">
-                      <h3 className="text-lg sm:text-xl font-semibold text-slate-700 mb-2">
-                        Ready to track star history?
-                      </h3>
-                      <p className="text-slate-500 mb-4 text-sm sm:text-base">
-                        Add a GitHub repository to see its star growth over time
-                      </p>
-                      <div className="flex items-center justify-center space-x-2 text-sm text-slate-400">
-                        <Star className="w-4 h-4" />
-                        <span>Powered by GitHub API</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
+              {showInsights && selectedRepos.length > 0 && (
+                <div className="mb-6">
+                  <RepositoryInsights
+                    repositories={selectedRepos}
+                    starHistoryData={starHistoryData}
+                    githubToken={githubToken}
+                  />
+                </div>
+              )}
+
+              <AdvancedChart
+                repositories={selectedRepos}
+                starHistoryData={starHistoryData}
+                isLoading={isAnyLoading}
+                selectedTimeRange={selectedTimeRange}
+                onTimeRangeChange={setSelectedTimeRange}
+                hoveredDataPoint={hoveredDataPoint}
+                onHoveredDataPointChange={setHoveredDataPoint}
+                zoomDomain={zoomDomain}
+                onZoomDomainChange={setZoomDomain}
+              />
             </CardContent>
           </Card>
         </main>
