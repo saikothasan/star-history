@@ -13,56 +13,175 @@ import {
   GitFork,
   Plus,
   Sparkles,
+  AlertTriangle,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import Link from "next/link"
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart } from "recharts"
+import { GitHubAPI, type GitHubRepo, type StarHistoryData } from "@/lib/github-api"
+import { GitHubTokenDialog } from "@/components/github-token-dialog"
+import { RepositorySearch } from "@/components/repository-search"
+import { RateLimitIndicator } from "@/components/rate-limit-indicator"
 
-// Mock data for the chart
-const generateMockData = (repoName: string) => {
-  const data = []
-  const startDate = new Date("2023-01-01")
-  const endDate = new Date()
-  const totalDays = Math.floor((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24))
-
-  let stars = Math.floor(Math.random() * 100) + 50
-
-  for (let i = 0; i <= totalDays; i += 7) {
-    const date = new Date(startDate.getTime() + i * 24 * 60 * 60 * 1000)
-    const growth = Math.floor(Math.random() * 20) + 1
-    stars += growth
-
-    data.push({
-      date: date.toISOString().split("T")[0],
-      stars: stars,
-      displayDate: date.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-    })
-  }
-
-  return data
+interface SelectedRepo extends GitHubRepo {
+  color: string
+  starHistory?: StarHistoryData[]
+  isLoading?: boolean
+  error?: string
 }
 
 export default function StarHistoryClone() {
-  const [selectedRepos, setSelectedRepos] = useState([
-    { name: "x1xhlol/system-prompts-and-models-of-ai-tools", color: "#3b82f6", stars: 2847 },
-  ])
+  const [selectedRepos, setSelectedRepos] = useState<SelectedRepo[]>([])
   const [searchInput, setSearchInput] = useState("")
   const [isLoading, setIsLoading] = useState(false)
-  const [chartData, setChartData] = useState<any[]>([])
-  const [showStats, setShowStats] = useState(true)
+  const [githubToken, setGithubToken] = useState<string>()
+  const [error, setError] = useState<string>()
 
   const repoColors = ["#3b82f6", "#ef4444", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899"]
 
+  // Load GitHub token from localStorage on mount
   useEffect(() => {
-    if (selectedRepos.length > 0) {
-      // Generate combined chart data
-      const combinedData = generateMockData(selectedRepos[0].name)
-      setChartData(combinedData)
+    const savedToken = localStorage.getItem("github_token")
+    if (savedToken) {
+      setGithubToken(savedToken)
     }
-  }, [selectedRepos])
+  }, [])
+
+  const handleTokenSave = (token: string) => {
+    setGithubToken(token)
+    localStorage.setItem("github_token", token)
+  }
+
+  const parseRepoInput = (input: string): { owner: string; repo: string } | null => {
+    // Handle different input formats
+    const patterns = [
+      /^([^/]+)\/([^/]+)$/, // owner/repo
+      /^https?:\/\/github\.com\/([^/]+)\/([^/]+)/, // GitHub URL
+    ]
+
+    for (const pattern of patterns) {
+      const match = input.match(pattern)
+      if (match) {
+        return { owner: match[1], repo: match[2] }
+      }
+    }
+    return null
+  }
+
+  const addRepositoryByInput = async () => {
+    if (!searchInput.trim()) return
+
+    const parsed = parseRepoInput(searchInput.trim())
+    if (!parsed) {
+      setError("Please enter a valid repository format (owner/repo) or GitHub URL")
+      return
+    }
+
+    setIsLoading(true)
+    setError(undefined)
+
+    try {
+      const githubAPI = new GitHubAPI(githubToken)
+      const repoData = await githubAPI.getRepository(parsed.owner, parsed.repo)
+
+      // Check if repo is already added
+      if (selectedRepos.some((repo) => repo.full_name === repoData.full_name)) {
+        setError("Repository is already added")
+        setIsLoading(false)
+        return
+      }
+
+      const newRepo: SelectedRepo = {
+        ...repoData,
+        color: repoColors[selectedRepos.length % repoColors.length],
+        isLoading: true,
+      }
+
+      setSelectedRepos((prev) => [...prev, newRepo])
+      setSearchInput("")
+
+      // Fetch star history in background
+      fetchStarHistory(newRepo, selectedRepos.length)
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const addRepositoryFromSearch = async (repo: GitHubRepo) => {
+    // Check if repo is already added
+    if (selectedRepos.some((r) => r.full_name === repo.full_name)) {
+      setError("Repository is already added")
+      return
+    }
+
+    const newRepo: SelectedRepo = {
+      ...repo,
+      color: repoColors[selectedRepos.length % repoColors.length],
+      isLoading: true,
+    }
+
+    setSelectedRepos((prev) => [...prev, newRepo])
+
+    // Fetch star history in background
+    fetchStarHistory(newRepo, selectedRepos.length)
+  }
+
+  const fetchStarHistory = async (repo: SelectedRepo, index: number) => {
+    try {
+      const githubAPI = new GitHubAPI(githubToken)
+      const [owner, repoName] = repo.full_name.split("/")
+      const starHistory = await githubAPI.getStarHistory(owner, repoName)
+
+      setSelectedRepos((prev) => prev.map((r, i) => (i === index ? { ...r, starHistory, isLoading: false } : r)))
+    } catch (err: any) {
+      setSelectedRepos((prev) => prev.map((r, i) => (i === index ? { ...r, error: err.message, isLoading: false } : r)))
+    }
+  }
+
+  const removeRepo = (index: number) => {
+    setSelectedRepos((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const clearAllRepos = () => {
+    setSelectedRepos([])
+    setError(undefined)
+  }
+
+  // Combine all star history data for the chart
+  const combinedChartData = () => {
+    if (selectedRepos.length === 0) return []
+
+    const allDates = new Set<string>()
+    selectedRepos.forEach((repo) => {
+      repo.starHistory?.forEach((point) => allDates.add(point.date))
+    })
+
+    const sortedDates = Array.from(allDates).sort()
+
+    return sortedDates.map((date) => {
+      const dataPoint: any = { date }
+
+      selectedRepos.forEach((repo, index) => {
+        const historyPoint = repo.starHistory?.find((p) => p.date === date)
+        if (historyPoint) {
+          dataPoint[`repo${index}`] = historyPoint.stars
+          dataPoint[`displayDate`] = historyPoint.displayDate
+        }
+      })
+
+      return dataPoint
+    })
+  }
+
+  const chartData = combinedChartData()
+  const totalStars = selectedRepos.reduce((sum, repo) => sum + repo.stargazers_count, 0)
+  const isAnyLoading = selectedRepos.some((repo) => repo.isLoading)
 
   const monthlyPicks = [
     { date: "2025 May", title: "Agent Protocol", category: "Agent Protocol", trending: true },
@@ -76,41 +195,6 @@ export default function StarHistoryClone() {
     { date: "2024 Sep", title: "AI Agents", category: "AI Agents", trending: true },
     { date: "2024 Aug", title: "RAG Frameworks", category: "RAG Frameworks", trending: false },
   ]
-
-  const handleViewStarHistory = async () => {
-    if (searchInput.trim()) {
-      setIsLoading(true)
-
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 1500))
-
-      const newRepo = {
-        name: searchInput.trim(),
-        color: repoColors[selectedRepos.length % repoColors.length],
-        stars: Math.floor(Math.random() * 5000) + 100,
-      }
-
-      setSelectedRepos([...selectedRepos, newRepo])
-      setSearchInput("")
-      setIsLoading(false)
-    }
-  }
-
-  const removeRepo = (index: number) => {
-    const newRepos = selectedRepos.filter((_, i) => i !== index)
-    setSelectedRepos(newRepos)
-  }
-
-  const clearAllRepos = () => {
-    setSelectedRepos([])
-    setChartData([])
-  }
-
-  const totalStars = selectedRepos.reduce((sum, repo) => sum + repo.stars, 0)
-  const avgGrowth =
-    chartData.length > 1
-      ? Math.round(((chartData[chartData.length - 1]?.stars - chartData[0]?.stars) / chartData.length) * 7)
-      : 0
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50">
@@ -133,9 +217,7 @@ export default function StarHistoryClone() {
               <Link href="#" className="hover:text-emerald-400 transition-all duration-200 font-medium">
                 Blog
               </Link>
-              <Link href="#" className="hover:text-emerald-400 transition-all duration-200 font-medium">
-                Add Access Token
-              </Link>
+              <GitHubTokenDialog onTokenSave={handleTokenSave} hasToken={!!githubToken} />
               <Link href="#" className="hover:text-emerald-400 transition-all duration-200 font-medium">
                 API
               </Link>
@@ -269,36 +351,62 @@ export default function StarHistoryClone() {
             </CardContent>
           </Card>
 
+          {/* Rate Limit Indicator */}
+          <RateLimitIndicator githubToken={githubToken} />
+
+          {/* Error Alert */}
+          {error && (
+            <Alert className="mb-4 border-red-500 bg-red-50">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertDescription className="flex items-center justify-between">
+                <span>{error}</span>
+                <Button variant="ghost" size="sm" onClick={() => setError(undefined)}>
+                  <X className="w-4 h-4" />
+                </Button>
+              </AlertDescription>
+            </Alert>
+          )}
+
           {/* Search Section */}
           <Card className="mb-6 shadow-lg border-0 bg-white/80 backdrop-blur-sm">
             <CardContent className="p-6">
-              <div className="flex space-x-3 mb-4">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 w-5 h-5" />
-                  <Input
-                    placeholder="Enter GitHub repository (e.g., facebook/react)"
-                    value={searchInput}
-                    onChange={(e) => setSearchInput(e.target.value)}
-                    className="pl-10 h-12 border-slate-300 focus:border-emerald-500 focus:ring-emerald-500"
-                    onKeyPress={(e) => e.key === "Enter" && handleViewStarHistory()}
-                  />
+              <div className="space-y-4">
+                <div className="flex space-x-3">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 w-5 h-5" />
+                    <Input
+                      placeholder="Enter GitHub repository (e.g., facebook/react)"
+                      value={searchInput}
+                      onChange={(e) => setSearchInput(e.target.value)}
+                      className="pl-10 h-12 border-slate-300 focus:border-emerald-500 focus:ring-emerald-500"
+                      onKeyPress={(e) => e.key === "Enter" && addRepositoryByInput()}
+                    />
+                  </div>
+                  <Button
+                    onClick={addRepositoryByInput}
+                    disabled={isLoading || !searchInput.trim()}
+                    className="h-12 px-6 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white shadow-lg transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:transform-none"
+                  >
+                    {isLoading ? (
+                      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
+                    ) : (
+                      <Plus className="w-5 h-5 mr-2" />
+                    )}
+                    Add Repository
+                  </Button>
                 </div>
-                <Button
-                  onClick={handleViewStarHistory}
-                  disabled={isLoading || !searchInput.trim()}
-                  className="h-12 px-6 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white shadow-lg transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:transform-none"
-                >
-                  {isLoading ? (
-                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
-                  ) : (
-                    <Plus className="w-5 h-5 mr-2" />
-                  )}
-                  Add Repository
-                </Button>
+
+                {/* Repository Search */}
+                <div>
+                  <label className="text-sm font-medium text-slate-700 mb-2 block">
+                    Or search popular repositories:
+                  </label>
+                  <RepositorySearch onSelectRepository={addRepositoryFromSearch} githubToken={githubToken} />
+                </div>
               </div>
 
               {selectedRepos.length > 0 && (
-                <div className="space-y-3">
+                <div className="space-y-3 mt-6">
                   <div className="flex items-center justify-between">
                     <h4 className="font-medium text-slate-700">Selected Repositories</h4>
                     <Button
@@ -313,16 +421,27 @@ export default function StarHistoryClone() {
                   <div className="flex flex-wrap gap-2">
                     {selectedRepos.map((repo, index) => (
                       <div
-                        key={index}
+                        key={repo.id}
                         className="bg-white border border-slate-200 rounded-lg px-3 py-2 flex items-center space-x-2 shadow-sm"
                       >
                         <div className="w-3 h-3 rounded-full" style={{ backgroundColor: repo.color }}></div>
-                        <span className="text-sm font-medium text-slate-700">{repo.name}</span>
+                        <span className="text-sm font-medium text-slate-700">{repo.full_name}</span>
                         <div className="flex items-center space-x-1 text-xs text-slate-500">
                           <Star className="w-3 h-3 fill-current" />
-                          <span>{repo.stars.toLocaleString()}</span>
+                          <span>{repo.stargazers_count.toLocaleString()}</span>
                         </div>
-                        <ExternalLink className="w-3 h-3 text-slate-400" />
+                        {repo.isLoading && (
+                          <div className="w-3 h-3 border border-slate-300 border-t-slate-600 rounded-full animate-spin" />
+                        )}
+                        {repo.error && <AlertTriangle className="w-3 h-3 text-red-500" />}
+                        <a
+                          href={repo.html_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-slate-400 hover:text-slate-600"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
                         <button
                           onClick={() => removeRepo(index)}
                           className="text-slate-400 hover:text-slate-600 transition-colors"
@@ -338,7 +457,7 @@ export default function StarHistoryClone() {
           </Card>
 
           {/* Stats Cards */}
-          {selectedRepos.length > 0 && showStats && (
+          {selectedRepos.length > 0 && (
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
               <Card className="border-0 shadow-lg bg-gradient-to-br from-blue-50 to-blue-100">
                 <CardContent className="p-4">
@@ -368,8 +487,10 @@ export default function StarHistoryClone() {
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-purple-700">Avg Growth/Week</p>
-                      <p className="text-2xl font-bold text-purple-900">+{avgGrowth}</p>
+                      <p className="text-sm font-medium text-purple-700">Total Forks</p>
+                      <p className="text-2xl font-bold text-purple-900">
+                        {selectedRepos.reduce((sum, repo) => sum + repo.forks_count, 0).toLocaleString()}
+                      </p>
                     </div>
                     <TrendingUp className="w-8 h-8 text-purple-600" />
                   </div>
@@ -380,8 +501,10 @@ export default function StarHistoryClone() {
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-orange-700">Time Range</p>
-                      <p className="text-2xl font-bold text-orange-900">{chartData.length}w</p>
+                      <p className="text-sm font-medium text-orange-700">Languages</p>
+                      <p className="text-2xl font-bold text-orange-900">
+                        {new Set(selectedRepos.map((repo) => repo.language).filter(Boolean)).size}
+                      </p>
                     </div>
                     <Calendar className="w-8 h-8 text-orange-600" />
                   </div>
@@ -404,7 +527,7 @@ export default function StarHistoryClone() {
             </CardHeader>
             <CardContent className="p-6">
               <div className="h-96">
-                {isLoading ? (
+                {isAnyLoading ? (
                   <div className="flex flex-col items-center justify-center h-full space-y-4">
                     <div className="w-12 h-12 border-4 border-emerald-200 border-t-emerald-600 rounded-full animate-spin"></div>
                     <p className="text-slate-600 font-medium">Loading star history...</p>
@@ -414,10 +537,12 @@ export default function StarHistoryClone() {
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={chartData}>
                       <defs>
-                        <linearGradient id="colorStars" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                          <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.05} />
-                        </linearGradient>
+                        {selectedRepos.map((repo, index) => (
+                          <linearGradient key={index} id={`color${index}`} x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor={repo.color} stopOpacity={0.3} />
+                            <stop offset="95%" stopColor={repo.color} stopOpacity={0.05} />
+                          </linearGradient>
+                        ))}
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                       <XAxis dataKey="displayDate" stroke="#64748b" fontSize={12} tickLine={false} />
@@ -434,18 +559,28 @@ export default function StarHistoryClone() {
                           borderRadius: "8px",
                           boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.1)",
                         }}
-                        formatter={(value: any) => [value.toLocaleString(), "Stars"]}
+                        formatter={(value: any, name: string) => {
+                          const repoIndex = Number.parseInt(name.replace("repo", ""))
+                          const repo = selectedRepos[repoIndex]
+                          return [value?.toLocaleString(), repo?.full_name || "Repository"]
+                        }}
                         labelFormatter={(label) => `Date: ${label}`}
                       />
-                      <Area
-                        type="monotone"
-                        dataKey="stars"
-                        stroke="#3b82f6"
-                        strokeWidth={3}
-                        fill="url(#colorStars)"
-                        dot={{ fill: "#3b82f6", strokeWidth: 2, r: 4 }}
-                        activeDot={{ r: 6, stroke: "#3b82f6", strokeWidth: 2, fill: "white" }}
-                      />
+                      {selectedRepos.map(
+                        (repo, index) =>
+                          repo.starHistory && (
+                            <Area
+                              key={index}
+                              type="monotone"
+                              dataKey={`repo${index}`}
+                              stroke={repo.color}
+                              strokeWidth={2}
+                              fill={`url(#color${index})`}
+                              dot={false}
+                              activeDot={{ r: 4, stroke: repo.color, strokeWidth: 2, fill: "white" }}
+                            />
+                          ),
+                      )}
                     </AreaChart>
                   </ResponsiveContainer>
                 ) : (
