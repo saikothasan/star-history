@@ -25,7 +25,7 @@ interface EmbedDialogProps {
   chartData: any[]
 }
 
-export function EmbedDialog({ repositories, starHistoryData, chartData }: EmbedDialogProps) {
+export function EmbedDialog({ repositories = [], starHistoryData = {}, chartData = [] }: EmbedDialogProps) {
   const [embedConfig, setEmbedConfig] = useState({
     width: 800,
     height: 400,
@@ -37,26 +37,36 @@ export function EmbedDialog({ repositories, starHistoryData, chartData }: EmbedD
   })
   const [copied, setCopied] = useState<string>("")
 
-  // Generate embed URL
+  // Generate embed URL with error handling
   const generateEmbedUrl = () => {
-    const params = new URLSearchParams({
-      repos: repositories.map((r) => r.full_name).join(","),
-      width: embedConfig.width.toString(),
-      height: embedConfig.height.toString(),
-      theme: embedConfig.theme,
-      legend: embedConfig.showLegend.toString(),
-      grid: embedConfig.showGrid.toString(),
-      range: embedConfig.timeRange,
-      animated: embedConfig.animated.toString(),
-    })
+    try {
+      if (!repositories || repositories.length === 0) return ""
 
-    return `${window.location.origin}/embed?${params.toString()}`
+      const params = new URLSearchParams({
+        repos: repositories.map((r) => r.full_name).join(","),
+        width: embedConfig.width.toString(),
+        height: embedConfig.height.toString(),
+        theme: embedConfig.theme,
+        legend: embedConfig.showLegend.toString(),
+        grid: embedConfig.showGrid.toString(),
+        range: embedConfig.timeRange,
+        animated: embedConfig.animated.toString(),
+      })
+
+      return `${typeof window !== "undefined" ? window.location.origin : ""}/embed?${params.toString()}`
+    } catch (error) {
+      console.error("Error generating embed URL:", error)
+      return ""
+    }
   }
 
-  // Generate iframe code
+  // Generate iframe code with error handling
   const generateIframeCode = () => {
-    const url = generateEmbedUrl()
-    return `<iframe 
+    try {
+      const url = generateEmbedUrl()
+      if (!url) return ""
+
+      return `<iframe 
   src="${url}"
   width="${embedConfig.width}" 
   height="${embedConfig.height}"
@@ -64,20 +74,38 @@ export function EmbedDialog({ repositories, starHistoryData, chartData }: EmbedD
   loading="lazy"
   title="Star History Chart">
 </iframe>`
+    } catch (error) {
+      console.error("Error generating iframe code:", error)
+      return ""
+    }
   }
 
-  // Generate API endpoint
+  // Generate API endpoint with error handling
   const generateApiUrl = () => {
-    const repos = repositories.map((r) => r.full_name).join(",")
-    return `${window.location.origin}/api/star-history?repos=${encodeURIComponent(repos)}&format=json`
+    try {
+      if (!repositories || repositories.length === 0) return ""
+
+      const repos = repositories.map((r) => r.full_name).join(",")
+      return `${typeof window !== "undefined" ? window.location.origin : ""}/api/star-history?repos=${encodeURIComponent(repos)}&format=json`
+    } catch (error) {
+      console.error("Error generating API URL:", error)
+      return ""
+    }
   }
 
-  // Generate shareable link
+  // Generate shareable link with error handling
   const generateShareUrl = () => {
-    const params = new URLSearchParams({
-      repos: repositories.map((r) => r.full_name).join(","),
-    })
-    return `${window.location.origin}?${params.toString()}`
+    try {
+      if (!repositories || repositories.length === 0) return ""
+
+      const params = new URLSearchParams({
+        repos: repositories.map((r) => r.full_name).join(","),
+      })
+      return `${typeof window !== "undefined" ? window.location.origin : ""}?${params.toString()}`
+    } catch (error) {
+      console.error("Error generating share URL:", error)
+      return ""
+    }
   }
 
   const copyToClipboard = async (text: string, type: string) => {

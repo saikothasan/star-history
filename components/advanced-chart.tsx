@@ -31,86 +31,128 @@ interface AdvancedChartProps {
 }
 
 export function AdvancedChart({
-  repositories,
-  starHistoryData,
-  isLoading,
-  selectedTimeRange,
+  repositories = [],
+  starHistoryData = {},
+  isLoading = false,
+  selectedTimeRange = "all",
   onTimeRangeChange,
   hoveredDataPoint,
   onHoveredDataPointChange,
-  zoomDomain,
+  zoomDomain = {},
   onZoomDomainChange,
 }: AdvancedChartProps) {
   const [showBrush, setShowBrush] = useState(false)
   const [crosshairData, setCrosshairData] = useState<any>(null)
 
-  // Filter data based on time range
-  const filteredChartData = useMemo(() => {
-    if (repositories.length === 0) return []
-
-    const now = new Date()
-    let startDate: Date
-
-    switch (selectedTimeRange) {
-      case "1m":
-        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
-        break
-      case "3m":
-        startDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000)
-        break
-      case "6m":
-        startDate = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000)
-        break
-      case "1y":
-        startDate = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000)
-        break
-      default:
-        startDate = new Date("1970-01-01")
-    }
-
-    const allDates = new Set<string>()
-    repositories.forEach((repo) => {
-      repo.starHistory?.forEach((point) => {
-        const pointDate = new Date(point.date)
-        if (pointDate >= startDate) {
-          allDates.add(point.date)
-        }
-      })
-    })
-
-    const sortedDates = Array.from(allDates).sort()
-
-    return sortedDates.map((date) => {
-      const dataPoint: any = {
-        date,
-        timestamp: new Date(date).getTime(),
-        displayDate: new Date(date).toLocaleDateString("en-US", {
-          month: "short",
-          day: "numeric",
-          year: selectedTimeRange === "all" ? "numeric" : undefined,
-        }),
-      }
-
-      repositories.forEach((repo, index) => {
-        const historyPoint = repo.starHistory?.find((p) => p.date === date)
-        if (historyPoint) {
-          dataPoint[`repo${index}`] = historyPoint.stars
-          dataPoint[`repo${index}_growth`] = calculateDailyGrowth(repo.starHistory!, date)
-        }
-      })
-
-      return dataPoint
-    })
-  }, [repositories, selectedTimeRange])
+  // Early return if no repositories
+  if (!repositories || repositories.length === 0) {
+    return (
+      <div className="h-64 sm:h-96 flex flex-col items-center justify-center space-y-6">
+        <div className="w-16 h-16 sm:w-24 sm:h-24 bg-gradient-to-br from-slate-100 to-slate-200 rounded-2xl flex items-center justify-center shadow-lg">
+          <TrendingUp className="w-8 h-8 sm:w-12 sm:h-12 text-slate-400" />
+        </div>
+        <div className="text-center px-4">
+          <h3 className="text-lg sm:text-xl font-semibold text-slate-700 mb-2">Ready to track star history?</h3>
+          <p className="text-slate-500 mb-4 text-sm sm:text-base">
+            Add a GitHub repository to see its star growth over time
+          </p>
+          <div className="flex items-center justify-center space-x-2 text-sm text-slate-400">
+            <Star className="w-4 h-4" />
+            <span>Powered by GitHub API</span>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   const calculateDailyGrowth = (history: StarHistoryData[], currentDate: string): number => {
+    if (!history || history.length === 0) return 0
+
     const currentIndex = history.findIndex((p) => p.date === currentDate)
     if (currentIndex <= 0) return 0
 
     const current = history[currentIndex]
     const previous = history[currentIndex - 1]
+
+    if (!current || !previous) return 0
+
     return current.stars - previous.stars
   }
+
+  const [filteredChartData, setFilteredChartData] = useState<any[]>([])
+
+  useMemo(() => {
+    if (!repositories || repositories.length === 0) {
+      setFilteredChartData([])
+      return
+    }
+
+    try {
+      const now = new Date()
+      let startDate: Date
+
+      switch (selectedTimeRange) {
+        case "1m":
+          startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
+          break
+        case "3m":
+          startDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000)
+          break
+        case "6m":
+          startDate = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000)
+          break
+        case "1y":
+          startDate = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000)
+          break
+        default:
+          startDate = new Date("1970-01-01")
+      }
+
+      const allDates = new Set<string>()
+      repositories.forEach((repo) => {
+        if (repo.starHistory && Array.isArray(repo.starHistory)) {
+          repo.starHistory.forEach((point) => {
+            if (point && point.date) {
+              const pointDate = new Date(point.date)
+              if (pointDate >= startDate && !isNaN(pointDate.getTime())) {
+                allDates.add(point.date)
+              }
+            }
+          })
+        }
+      })
+
+      const sortedDates = Array.from(allDates).sort()
+
+      const newFilteredChartData = sortedDates.map((date) => {
+        const dataPoint: any = {
+          date,
+          timestamp: new Date(date).getTime(),
+          displayDate: new Date(date).toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: selectedTimeRange === "all" ? "numeric" : undefined,
+          }),
+        }
+
+        repositories.forEach((repo, index) => {
+          if (repo.starHistory && Array.isArray(repo.starHistory)) {
+            const historyPoint = repo.starHistory.find((p) => p && p.date === date)
+            if (historyPoint) {
+              dataPoint[`repo${index}`] = historyPoint.stars
+              dataPoint[`repo${index}_growth`] = calculateDailyGrowth(repo.starHistory, date)
+            }
+          }
+        })
+
+        return dataPoint
+      })
+      setFilteredChartData(newFilteredChartData)
+    } catch (error) {
+      console.error("Error processing chart data:", error)
+      setFilteredChartData([])
+    }
+  }, [repositories, selectedTimeRange])
 
   const timeRangeOptions = [
     { value: "all" as const, label: "All Time" },

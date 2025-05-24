@@ -18,8 +18,8 @@ import {
 import type { GitHubRepo, StarHistoryData } from "@/lib/github-api"
 
 interface RepositoryInsightsProps {
-  repositories: Array<GitHubRepo & { color: string; starHistory?: StarHistoryData[] }>
-  starHistoryData: Record<string, StarHistoryData[]>
+  repositories?: Array<GitHubRepo & { color: string; starHistory?: StarHistoryData[] }>
+  starHistoryData?: Record<string, StarHistoryData[]>
   githubToken?: string
 }
 
@@ -45,98 +45,133 @@ interface RepositoryMetrics {
   prediction30Days: number
 }
 
-export function RepositoryInsights({ repositories, starHistoryData, githubToken }: RepositoryInsightsProps) {
+export function RepositoryInsights({ repositories = [], starHistoryData = {}, githubToken }: RepositoryInsightsProps) {
   const [insights, setInsights] = useState<Insight[]>([])
   const [metrics, setMetrics] = useState<Record<string, RepositoryMetrics>>({})
   const [selectedRepo, setSelectedRepo] = useState<string>()
   const [isAnalyzing, setIsAnalyzing] = useState(false)
 
+  const [repoMetrics, setRepoMetrics] = useState<Record<string, RepositoryMetrics>>({})
+
   // Calculate repository metrics
-  const calculateMetrics = useMemo(() => {
-    const repoMetrics: Record<string, RepositoryMetrics> = {}
+  const calculateMetrics = () => {
+    const metrics: Record<string, RepositoryMetrics> = {}
+
+    if (!repositories || repositories.length === 0) return metrics
 
     repositories.forEach((repo) => {
-      if (!repo.starHistory || repo.starHistory.length < 2) return
+      try {
+        if (!repo.starHistory || !Array.isArray(repo.starHistory) || repo.starHistory.length < 2) return
 
-      const history = repo.starHistory.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-      const totalDays =
-        (new Date(history[history.length - 1].date).getTime() - new Date(history[0].date).getTime()) /
-        (1000 * 60 * 60 * 24)
-      const totalGrowth = history[history.length - 1].stars - history[0].stars
+        const history = repo.starHistory
+          .filter((point) => point && point.date && typeof point.stars === "number")
+          .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
 
-      // Calculate velocity (stars per day)
-      const averageDailyGrowth = totalGrowth / Math.max(totalDays, 1)
+        if (history.length < 2) return
 
-      // Calculate consistency score (based on growth variance)
-      const dailyGrowths = history.slice(1).map((point, index) => point.stars - history[index].stars)
-      const avgGrowth = dailyGrowths.reduce((sum, growth) => sum + growth, 0) / dailyGrowths.length
-      const variance =
-        dailyGrowths.reduce((sum, growth) => sum + Math.pow(growth - avgGrowth, 2), 0) / dailyGrowths.length
-      const consistencyScore = Math.max(0, 100 - (Math.sqrt(variance) / avgGrowth) * 100)
+        const totalDays = Math.max(
+          1,
+          (new Date(history[history.length - 1].date).getTime() - new Date(history[0].date).getTime()) /
+            (1000 * 60 * 60 * 24),
+        )
+        const totalGrowth = Math.max(0, history[history.length - 1].stars - history[0].stars)
 
-      // Calculate momentum (recent vs overall performance)
-      const recent30Days = history.slice(-30)
-      const recentGrowth =
-        recent30Days.length > 1
-          ? (recent30Days[recent30Days.length - 1].stars - recent30Days[0].stars) / recent30Days.length
-          : 0
-      const momentumScore = Math.min(100, (recentGrowth / Math.max(averageDailyGrowth, 0.1)) * 100)
+        // Calculate velocity (stars per day)
+        const averageDailyGrowth = totalGrowth / totalDays
 
-      // Find milestones
-      const milestones: Array<{ date: string; stars: number; type: string }> = []
-      const milestoneTargets = [100, 500, 1000, 5000, 10000, 50000, 100000]
+        // Calculate consistency score (based on growth variance)
+        const dailyGrowths = history.slice(1).map((point, index) => Math.max(0, point.stars - history[index].stars))
+        const avgGrowth = dailyGrowths.reduce((sum, growth) => sum + growth, 0) / Math.max(1, dailyGrowths.length)
+        const variance =
+          dailyGrowths.reduce((sum, growth) => sum + Math.pow(growth - avgGrowth, 2), 0) /
+          Math.max(1, dailyGrowths.length)
+        const consistencyScore = avgGrowth > 0 ? Math.max(0, 100 - (Math.sqrt(variance) / avgGrowth) * 100) : 0
 
-      milestoneTargets.forEach((target) => {
-        const milestone = history.find((point) => point.stars >= target)
-        if (milestone) {
-          milestones.push({
-            date: milestone.date,
-            stars: target,
-            type: target >= 10000 ? "major" : target >= 1000 ? "significant" : "minor",
-          })
-        }
-      })
+        // Calculate momentum (recent vs overall performance)
+        const recent30Days = history.slice(-Math.min(30, history.length))
+        const recentGrowth =
+          recent30Days.length > 1
+            ? Math.max(0, (recent30Days[recent30Days.length - 1].stars - recent30Days[0].stars) / recent30Days.length)
+            : 0
+        const momentumScore = Math.min(100, averageDailyGrowth > 0 ? (recentGrowth / averageDailyGrowth) * 100 : 0)
 
-      // Find best growth period (30-day window)
-      let bestPeriod = { start: "", end: "", growth: 0 }
-      for (let i = 0; i < history.length - 30; i++) {
-        const windowGrowth = history[i + 30].stars - history[i].stars
-        if (windowGrowth > bestPeriod.growth) {
-          bestPeriod = {
-            start: history[i].date,
-            end: history[i + 30].date,
-            growth: windowGrowth,
+        // Find milestones
+        const milestones: Array<{ date: string; stars: number; type: string }> = []
+        const milestoneTargets = [100, 500, 1000, 5000, 10000, 50000, 100000]
+
+        milestoneTargets.forEach((target) => {
+          const milestone = history.find((point) => point.stars >= target)
+          if (milestone) {
+            milestones.push({
+              date: milestone.date,
+              stars: target,
+              type: target >= 10000 ? "major" : target >= 1000 ? "significant" : "minor",
+            })
+          }
+        })
+
+        // Find best growth period (30-day window)
+        let bestPeriod = { start: "", end: "", growth: 0 }
+        const windowSize = Math.min(30, Math.floor(history.length / 2))
+
+        for (let i = 0; i < history.length - windowSize; i++) {
+          const windowGrowth = Math.max(0, history[i + windowSize].stars - history[i].stars)
+          if (windowGrowth > bestPeriod.growth) {
+            bestPeriod = {
+              start: history[i].date,
+              end: history[i + windowSize].date,
+              growth: windowGrowth,
+            }
           }
         }
-      }
 
-      // Simple prediction (linear projection)
-      const recentTrend = averageDailyGrowth
-      const prediction30Days = Math.round(repo.stargazers_count + recentTrend * 30)
+        // Simple prediction (linear projection)
+        const prediction30Days = Math.max(
+          repo.stargazers_count,
+          Math.round(repo.stargazers_count + averageDailyGrowth * 30),
+        )
 
-      repoMetrics[repo.full_name] = {
-        velocityScore: Math.min(100, averageDailyGrowth * 10),
-        consistencyScore: Math.round(consistencyScore),
-        momentumScore: Math.round(momentumScore),
-        milestones,
-        growthRate: (totalGrowth / repo.stargazers_count) * 100,
-        averageDailyGrowth,
-        bestPeriod,
-        prediction30Days,
+        metrics[repo.full_name] = {
+          velocityScore: Math.min(100, Math.max(0, averageDailyGrowth * 10)),
+          consistencyScore: Math.round(Math.max(0, Math.min(100, consistencyScore))),
+          momentumScore: Math.round(Math.max(0, Math.min(100, momentumScore))),
+          milestones,
+          growthRate: repo.stargazers_count > 0 ? (totalGrowth / repo.stargazers_count) * 100 : 0,
+          averageDailyGrowth: Math.max(0, averageDailyGrowth),
+          bestPeriod,
+          prediction30Days,
+        }
+      } catch (error) {
+        console.error(`Error calculating metrics for ${repo.full_name}:`, error)
       }
     })
 
-    return repoMetrics
+    return metrics
+  }
+
+  const calculatedRepoMetrics = useMemo(() => {
+    return calculateMetrics()
   }, [repositories])
+
+  // Early return if no repositories
+  if (!repositories || repositories.length === 0) {
+    return (
+      <div className="text-center py-8">
+        <CheckCircle className="w-12 h-12 text-slate-400 mx-auto mb-3" />
+        <p className="text-slate-600">No repositories to analyze</p>
+        <p className="text-sm text-slate-500">Add repositories to generate insights</p>
+      </div>
+    )
+  }
 
   // Generate insights
   useEffect(() => {
-    setMetrics(calculateMetrics)
+    setMetrics(calculatedRepoMetrics)
 
     const newInsights: Insight[] = []
 
     repositories.forEach((repo) => {
-      const repoMetrics = calculateMetrics[repo.full_name]
+      const repoMetrics = calculatedRepoMetrics[repo.full_name]
       if (!repoMetrics) return
 
       // Momentum insights
@@ -196,8 +231,8 @@ export function RepositoryInsights({ repositories, starHistoryData, githubToken 
     // Comparison insights
     if (repositories.length > 1) {
       const sortedByMomentum = repositories.sort((a, b) => {
-        const aMetrics = calculateMetrics[a.full_name]
-        const bMetrics = calculateMetrics[b.full_name]
+        const aMetrics = calculatedRepoMetrics[a.full_name]
+        const bMetrics = calculatedRepoMetrics[b.full_name]
         return (bMetrics?.momentumScore || 0) - (aMetrics?.momentumScore || 0)
       })
 
@@ -212,7 +247,7 @@ export function RepositoryInsights({ repositories, starHistoryData, githubToken 
     }
 
     setInsights(newInsights)
-  }, [repositories, calculateMetrics])
+  }, [repositories, calculatedRepoMetrics])
 
   const getMetricColor = (score: number) => {
     if (score >= 80) return "text-green-600"

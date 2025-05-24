@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useMemo } from "react"
 import {
   Search,
   Star,
@@ -59,17 +59,29 @@ export default function StarHistoryClone() {
 
   const repoColors = ["#3b82f6", "#ef4444", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899"]
 
-  // Load GitHub token from localStorage on mount
+  // Load GitHub token from localStorage on mount with error handling
   useEffect(() => {
-    const savedToken = localStorage.getItem("github_token")
-    if (savedToken) {
-      setGithubToken(savedToken)
+    try {
+      if (typeof window !== "undefined") {
+        const savedToken = localStorage.getItem("github_token")
+        if (savedToken) {
+          setGithubToken(savedToken)
+        }
+      }
+    } catch (error) {
+      console.error("Error loading GitHub token:", error)
     }
   }, [])
 
   const handleTokenSave = (token: string) => {
-    setGithubToken(token)
-    localStorage.setItem("github_token", token)
+    try {
+      setGithubToken(token)
+      if (typeof window !== "undefined") {
+        localStorage.setItem("github_token", token)
+      }
+    } catch (error) {
+      console.error("Error saving GitHub token:", error)
+    }
   }
 
   const parseRepoInput = (input: string): { owner: string; repo: string } | null => {
@@ -165,44 +177,64 @@ export default function StarHistoryClone() {
 
   // Combine all star history data for the chart
   const combinedChartData = () => {
-    if (selectedRepos.length === 0) return []
+    try {
+      if (!selectedRepos || selectedRepos.length === 0) return []
 
-    const allDates = new Set<string>()
-    selectedRepos.forEach((repo) => {
-      repo.starHistory?.forEach((point) => allDates.add(point.date))
-    })
-
-    const sortedDates = Array.from(allDates).sort()
-
-    return sortedDates.map((date) => {
-      const dataPoint: any = { date }
-
-      selectedRepos.forEach((repo, index) => {
-        const historyPoint = repo.starHistory?.find((p) => p.date === date)
-        if (historyPoint) {
-          dataPoint[`repo${index}`] = historyPoint.stars
-          dataPoint[`displayDate`] = historyPoint.displayDate
+      const allDates = new Set<string>()
+      selectedRepos.forEach((repo) => {
+        if (repo.starHistory && Array.isArray(repo.starHistory)) {
+          repo.starHistory.forEach((point) => {
+            if (point && point.date) {
+              allDates.add(point.date)
+            }
+          })
         }
       })
 
-      return dataPoint
-    })
+      const sortedDates = Array.from(allDates).sort()
+
+      return sortedDates.map((date) => {
+        const dataPoint: any = { date }
+
+        selectedRepos.forEach((repo, index) => {
+          if (repo.starHistory && Array.isArray(repo.starHistory)) {
+            const historyPoint = repo.starHistory.find((p) => p && p.date === date)
+            if (historyPoint) {
+              dataPoint[`repo${index}`] = historyPoint.stars
+              dataPoint[`displayDate`] = historyPoint.displayDate
+            }
+          }
+        })
+
+        return dataPoint
+      })
+    } catch (error) {
+      console.error("Error combining chart data:", error)
+      return []
+    }
   }
 
   const chartData = combinedChartData()
   const totalStars = selectedRepos.reduce((sum, repo) => sum + repo.stargazers_count, 0)
   const isAnyLoading = selectedRepos.some((repo) => repo.isLoading)
 
-  // Prepare data for export
-  const starHistoryData = selectedRepos.reduce(
-    (acc, repo) => {
-      if (repo.starHistory) {
-        acc[repo.full_name] = repo.starHistory
-      }
-      return acc
-    },
-    {} as Record<string, StarHistoryData[]>,
-  )
+  // Prepare data for export with error handling
+  const starHistoryData = useMemo(() => {
+    try {
+      return selectedRepos.reduce(
+        (acc, repo) => {
+          if (repo.starHistory && Array.isArray(repo.starHistory)) {
+            acc[repo.full_name] = repo.starHistory
+          }
+          return acc
+        },
+        {} as Record<string, StarHistoryData[]>,
+      )
+    } catch (error) {
+      console.error("Error preparing star history data:", error)
+      return {}
+    }
+  }, [selectedRepos])
 
   const monthlyPicks = [
     { date: "2025 May", title: "Agent Protocol", category: "Agent Protocol", trending: true },
