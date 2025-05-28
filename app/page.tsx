@@ -18,6 +18,7 @@ import {
   Download,
   GitBranch,
   BarChart3,
+  MessageCircle,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -332,6 +333,22 @@ export default function StarHistoryClone() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50">
+      {/* Top Telegram Banner */}
+      <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white py-2 px-4">
+        <div className="max-w-7xl mx-auto flex items-center justify-center">
+          <Link
+            href="https://t.me/drkingbd"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center space-x-2 text-sm hover:text-blue-200 transition-colors"
+          >
+            <MessageCircle className="w-4 h-4" />
+            <span>Join our Telegram community for updates and support</span>
+            <ExternalLink className="w-3 h-3" />
+          </Link>
+        </div>
+      </div>
+
       {/* Header */}
       <header className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white shadow-2xl border-b border-slate-700">
         <div className="flex items-center justify-between max-w-7xl mx-auto px-4 sm:px-6 py-4">
@@ -376,6 +393,15 @@ export default function StarHistoryClone() {
             {/* Social Links */}
             <div className="hidden sm:flex items-center space-x-2">
               <Link
+                href="https://t.me/drkingbd"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-400 hover:text-blue-300 transition-colors p-2 rounded-lg hover:bg-slate-700"
+                title="Join Telegram"
+              >
+                <MessageCircle className="w-5 h-5" />
+              </Link>
+              <Link
                 href="#"
                 className="text-blue-400 hover:text-blue-300 transition-colors p-2 rounded-lg hover:bg-slate-700"
               >
@@ -415,6 +441,16 @@ export default function StarHistoryClone() {
                   </div>
                 </div>
                 <div className="p-4 space-y-4">
+                  <Link
+                    href="https://t.me/drkingbd"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center space-x-2 text-blue-600 hover:text-blue-700 transition-colors"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    <span>Join Telegram</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </Link>
                   <GitHubTokenDialog onTokenSave={handleTokenSave} hasToken={!!githubToken} />
                   <ExportDialog repositories={selectedRepos} starHistoryData={starHistoryData} chartRef={chartRef} />
                   <RepositoryComparison repositories={selectedRepos} githubToken={githubToken} />
